@@ -1,0 +1,354 @@
+#region start
+number blue
+number red
+number yellow
+number black
+number white
+number brown
+number green
+number max
+
+Function Init()
+  Sensor.SetMode(4,4)
+  blue = 2
+  red = 5
+  yellow = 4
+  black = 1
+  white = 6
+  brown = 7
+  green = 3
+EndFunction
+#endregion
+
+#region core
+''''определение цвета
+''''ввод:
+''''dat - номер датчика
+''''dat_type - тип датчика(EV3 или HT)
+''''kb - порог для определения чёрного
+''''kw - порог для определения белого
+''''DoReturn - делать ли возврат при неудачном определении
+''''acc - точность(важна только при считывании в дивжении)
+''''IsDebugMode - включение режима отладки(1 - включено, не 1 - выключено)
+''''вывод:
+''''color - вывод номера цвета: 1  - чёрный, 2 - синий, 3 - зелёный, 4 - жёлтый, 5 - красный, 6 - белый
+Function ColorGet(in number dat, in string dat_type, in number kb, in number kw, in number DoReturn, in number acc, in number IsDebugMode, out number color)
+  max = 0
+  f_none = 0
+  f_count = 0
+  f_white = 0
+  f_black = 0
+  f_red = 0
+  f_green = 0
+  f_blue = 0
+  f_yellow = 0
+  sum_red = 0
+  sum_green = 0
+  sum_blue = 0
+  
+  If dat_type = "EV3" Then
+    n = EV3File.OpenRead("color_dat_ev3")
+  Else
+    n = EV3File.OpenRead("color_dat_ht")
+  EndIf
+  Sensor.SetMode(4,4)
+  prg_rd = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  prg_bl = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  prg_gr = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  prg_yl = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  If dat_type = "EV3" And dat = 4 Then
+    Sensor.SetMode(4,4)
+  ElseIf dat = 4 Then
+    Sensor.WriteI2CRegister(4, 1, 0, 0)
+    Sensor.WriteI2CRegister(4, 1, 0, 53)
+  EndIf
+  If dat_type = "EV3" And dat = 1 Then
+    Sensor.SetMode(1,4)
+  ElseIf dat = 1 Then
+    Sensor.WriteI2CRegister(1, 1, 0, 0)
+    Sensor.WriteI2CRegister(1, 1, 0, 53)
+  EndIf
+  For i = 1 To acc
+    start:
+    rd = 0
+    g = 0
+    blu = 0
+    If dat = 4 And dat_type = "EV3" Then
+      Sensor4.Raw3(rd,g,blu)
+    ElseIf dat_type = "EV3" Then
+      Sensor1.Raw3(rd,g,blu)
+    EndIf
+    If dat = 4 And dat_type <> "EV3" Then
+      value = Sensor.ReadI2CRegisters(4, 1, 66, 5)
+      rd = value[1]
+      g = value[2]
+      blu = value[3]
+    ElseIf dat_type <> "EV3" Then
+      value = Sensor.ReadI2CRegisters(1, 1, 66, 5)
+      rd = value[1]
+      g = value[2]
+      blu = value[3]
+    EndIf
+    If IsDebugMode = 1 Then
+      sum_red = sum_red + rd
+      sum_green = sum_green + g
+      sum_blue = sum_blue + blu
+    EndIf
+    If rd > kw And g > kw And blu > kw Then
+      f_white += 1
+    ElseIf rd < kb And g < kb And blu < kb Then
+      f_black += 1
+    ElseIf g > prg_gr And blu < prg_gr And rd < prg_gr Then
+      f_green += 1
+    ElseIf blu > prg_bl And rd < prg_bl And g < prg_bl Then
+      f_blue += 1
+      'ElseIf rd > kr And ((g * kpr < rd) And (blu * kpr > rd)) Then
+    ElseIf rd > prg_rd And g < prg_rd And blu < prg_rd Then
+      f_red += 1
+    ElseIf rd > prg_yl And g > prg_yl And blu < prg_yl Then
+      f_yellow += 1
+    Else
+      f_count += 1
+      If f_count = 50 Then
+        LCD.Text(1,10,10,2,"f")
+      EndIf
+      If IsDebugMode = 1 Then
+        'LCD.Text(1,10,10,2,color)
+        'LCD.Text(1,10,30,2,rd)
+        'LCD.Text(1,10,50,2,g)
+        'LCD.Text(1,10,70,2,blu)
+      EndIf
+      If f_count < 500 And DoReturn = 1 Then
+        Goto start
+      ElseIf DoReturn = 1 Then
+        
+      ElseIf DoReturn = 0 Then
+        f_none += 1
+      EndIf
+    EndIf
+  EndFor
+  
+  maxBW = Math.Max(f_black,f_white)
+  maxBuR = Math.Max(f_blue,f_red)
+  maxYG = Math.Max(f_yellow,f_green)
+  If Math.Max(Math.Max(maxBW,maxBur),maxYG) = f_black Then
+    color = black
+  ElseIf Math.Max(Math.Max(maxBW,maxBur),maxYG) = f_white Then
+    color = white
+  ElseIf Math.Max(Math.Max(maxBW,maxBur),maxYG) = f_red Then
+    color = red
+  ElseIf Math.Max(Math.Max(maxBW,maxBur),maxYG) = f_yellow Then
+    color = yellow
+  ElseIf Math.Max(Math.Max(maxBW,maxBur),maxYG) = f_green Then
+    color = green
+  ElseIf Math.Max(Math.Max(maxBW,maxBur),maxYG) = f_blue Then
+    color = blue
+  ElseIf f_none > acc/2 Then
+    'color = 0
+  EndIf
+  
+  LCD.Clear()
+  If IsDebugMode = 1 Then
+    LCD.Text(1,10,10,2,color)
+    LCD.Text(1,10,30,2,sum_red/acc)
+    LCD.Text(1,10,50,2,sum_green/acc)
+    LCD.Text(1,10,70,2,sum_blue/acc)
+  EndIf
+EndFunction
+
+''''ручная калибровка цветов
+''''ввод:
+''''dat_type - тип используемого датчика(EV3 или HT)
+''''port - порт калибруемого датчика
+Function ColorCaliber(in string dat_type, in number port)
+  Sensor.SetMode(4,4)
+  If dat_type = "EV3" Then
+    EV3.SystemCall("rm /home/root/lms2012/prjs/WRO2025/Files/color_dat_ev3")
+  Else
+    EV3.SystemCall("rm /home/root/lms2012/prjs/WRO2025/Files/color_dat_ht")
+  EndIf
+  
+  LCD.Text(1,10,10,1,"Insert red")
+  If dat_type = "EV3" Then
+    a = EV3File.OpenAppend("color_dat_ev3")
+  Else
+    a = EV3File.OpenAppend("color_dat_ht")
+  EndIf
+  Buttons.Flush()
+  Buttons.Wait()
+  LCD.Clear()
+  r = 0
+  g = 0
+  b = 0
+  If dat_type = "EV3" Then
+    Sensor4.Raw3(r,g,b)
+    red = (r+g+b)/3
+    EV3File.WriteLine(a,red)
+  Else
+    Sensor.WriteI2CRegister(1, 1, 0, 0)
+    Sensor.WriteI2CRegister(1, 1, 0, 53)
+    value = Sensor.ReadI2CRegisters(1, 1, 66, 5)
+    red = (value[1]+value[2]+value[3])/3
+    EV3File.WriteLine(a,red)
+  EndIf
+  EV3File.Close(a)
+  
+  LCD.Clear()
+  LCD.Text(1,10,10,1,"Insert blue")
+  If dat_type = "EV3" Then
+    a = EV3File.OpenAppend("color_dat_ev3")
+  Else
+    a = EV3File.OpenAppend("color_dat_ht")
+  EndIf
+  Buttons.Flush()
+  Buttons.Wait()
+  r = 0
+  g = 0
+  b = 0
+  If dat_type = "EV3" Then
+    Sensor4.Raw3(r,g,b)
+    red = (r+g+b)/3
+    EV3File.WriteLine(a,red)
+  Else
+    Sensor.WriteI2CRegister(1, 1, 0, 0)
+    Sensor.WriteI2CRegister(1, 1, 0, 53)
+    value = Sensor.ReadI2CRegisters(1, 1, 66, 5)
+    red = (value[1]+value[2]+value[3])/3
+    EV3File.WriteLine(a,red)
+  EndIf
+  EV3File.Close(a)
+  
+  LCD.Clear()
+  LCD.Text(1,10,10,1,"Insert green")
+  If dat_type = "EV3" Then
+    a = EV3File.OpenAppend("color_dat_ev3")
+  Else
+    a = EV3File.OpenAppend("color_dat_ht")
+  EndIf
+  Buttons.Flush()
+  Buttons.Wait()
+  r = 0
+  g = 0
+  b = 0
+  If dat_type = "EV3" Then
+    Sensor4.Raw3(r,g,b)
+    red = (r+g+b)/3
+    EV3File.WriteLine(a,red)
+  Else
+    Sensor.WriteI2CRegister(1, 1, 0, 0)
+    Sensor.WriteI2CRegister(1, 1, 0, 53)
+    value = Sensor.ReadI2CRegisters(1, 1, 66, 5)
+    red = (value[1]+value[2]+value[3])/3
+    EV3File.WriteLine(a,red)
+  EndIf
+  EV3File.Close(a)
+  
+  LCD.Clear()
+  LCD.Text(1,10,10,1,"Insert yellow")
+  If dat_type = "EV3" Then
+    a = EV3File.OpenAppend("color_dat_ev3")
+  Else
+    a = EV3File.OpenAppend("color_dat_ht")
+  EndIf
+  Buttons.Flush()
+  Buttons.Wait()
+  r = 0
+  g = 0
+  b = 0
+  If dat_type = "EV3" Then
+    Sensor4.Raw3(r,g,b)
+    red = (r+g+b)/3
+    EV3File.WriteLine(a,red)
+  Else
+    Sensor.WriteI2CRegister(1, 1, 0, 0)
+    Sensor.WriteI2CRegister(1, 1, 0, 53)
+    value = Sensor.ReadI2CRegisters(1, 1, 66, 5)
+    red = (value[1]+value[2]+value[3])/3
+    EV3File.WriteLine(a,red)
+  EndIf
+  EV3File.Close(a)
+  
+  If dat_type = "EV3" Then
+    a = EV3File.OpenRead("color_dat_ev3")
+  Else
+    a = EV3File.OpenRead("color_dat_ht")
+  EndIf
+  dat = EV3File.ReadLine(a)
+  LCD.Text(1,10,10,2,dat)
+  dat = EV3File.ReadLine(a)
+  LCD.Text(1,10,30,2,dat)
+  dat = EV3File.ReadLine(a)
+  LCD.Text(1,10,50,2,dat)
+  dat = EV3File.ReadLine(a)
+  LCD.Text(1,10,70,2,dat)
+  EV3File.Close(a)
+  LCD.Clear()
+EndFunction
+
+''''поиск объектов
+''''ввод:
+''''port - порт датчика
+''''l - нижний порог
+''''ll - верхний порог
+''''вывод:
+''''state - статус(0 - нет объекта, 1 - есть объект, 2 - объект далеко)
+Function DetectUz(in string port, in number l, in number ll, out number state)
+  If Sensor.ReadRawValue(port) > l Then
+    If Sensor.ReadRawValue(port) < ll Then
+      state = 1
+    Else
+      state = 2
+    EndIf
+  Else
+    state = 0
+  EndIf
+EndFunction
+
+''''детектор по датчику цвета
+''''ввод:
+''''prg - пороговое значение
+''''вывод:
+''''IsHere - есть ли объект
+Function DetectCol(in number prg, out number IsHere)
+  rd = 0
+  g = 0
+  blu = 0
+  Sensor4.Raw3(rd,g,blu)
+  
+  If rd > prg Or g > prg Or blu > prg Then
+    IsHere = 1
+  Else
+    IsHere = 0
+  EndIf
+EndFunction
+
+'x - сколько рядов значений
+'data - вывод данных`
+Function Butt(in number x, out number data)'ввод данных с блока
+  Buttons.Flush()
+  fl = 0
+  fl2 = 1
+  @data[x-1] = 0
+  
+  For i = 0 To x - 1
+    fl1 = 0
+    Buttons.Flush()
+    Buttons.Wait()
+    
+    While fl1 <> 1
+      If Buttons.Current = "U" Then
+        @data[i] = @data[i] + 1
+        Program.Delay(200)
+        Buttons.Flush()
+      ElseIf Buttons.Current = "D" Then
+        @data[i] = @data[i] - 1
+        Program.Delay(200)
+        Buttons.Flush()
+      ElseIf Buttons.Current = "E" Then
+        fl1 = 1
+      EndIf
+    EndWhile
+    LCD.Text(1,10 + 20 * i,10,2,@data[i])
+  EndFor
+EndFunction
+#endregion

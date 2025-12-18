@@ -1,0 +1,18 @@
+#region core
+''''vol - вывод заряда батареи в процентах
+Function Check_Battery(out number vol)
+  vol = EV3.BatteryLevel
+  If vol < 40 Then
+    LCD.Text(1,30,0,1,"WARNING! LOW POWER")
+  EndIf
+EndFunction
+
+''''пищалка для отладки
+Function Beep()
+  MotorBC.OffAndBrake()
+  EV3.SetLEDColor("RED","FLASH")
+  Speaker.Tone(25,750,3000)
+  Program.Delay(3000)
+  EV3.SetLEDColor("GREEN","NORMAL")
+EndFunction
+#endregion

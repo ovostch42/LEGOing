@@ -1,0 +1,931 @@
+#region start
+number a 'ускорение
+number kp 'проп. коэффицент для пида по линии
+number kpm 'проп. коэффицент для пида манипулятора
+number kd 'дифф. коэффицент для пицца по линии
+number ki 'интег. коэффицент для пида по линии
+number V 'скорость
+number bl 'чёрный порог(по нему определяется чёрный)
+number d'диаметр колеса робота
+number d2_min 'минимальный показания 2 датчика
+number d2_max'максимальные показания 2 датчика
+number d3_min'минимальные показания 3 датчика
+number d3_max'максимальные показания 3 датчика
+number crit_time'значения времени для захвата, после которого он выключится
+number cord_now
+number inf  'число, принятое за бесконечность
+number cor_count  'счётчки нужных для доезда координат
+number fld 'флажок для дейкстры
+number x_tek 'первоначальные координаты по x
+number y_tek 'первоначальные координаты по у
+number count 'неизвестный счётчик
+number kp_s 'проп. коэффицент для movesync
+number kd_s 'дифф. коэффицент для movesync
+number ki_s 'интег. коэффицент для movesync
+number err_old'ошибка дед(для pd)
+number er_old 'ошибка дед для пд movesync
+number enc 'текущее направление робота
+number s 'сумма(для пида по линии)
+number smov 'сумма(для пида movesync)
+number i 'кол-во ошибок(для пида по линии)
+number bcode 'значение штрихкода
+number im 'номер итерации пида
+number V_cur 'текущая скорость
+number P 'число пи
+number stime 'время остановки
+number old_count 'предыдущий градус мотора
+number V_min
+number V_cur_ms
+
+Function Init(in number acceleration, in number kprop, in number kdiff, in number kintg, in number kpMann, in number velocity, in number kpOffrd, in number kdOffrd, in number kiOffrd, in number vel_min, in number black)
+  a = acceleration 'ускорение
+  kp = kprop 'проп. коэффицент для пида по линии
+  kpm = kpMann 'проп. коэффицент для пида манипулятора 0.08
+  kd = kdiff 'дифф. коэффицент для пида по линии
+  ki = kintg 'интег. коэффицент для пида по линии
+  V = velocity 'скорость
+  bl = black 'чёрный порог(по нему определяется чёрный)
+  d =  6.24 'диаметр колеса робота
+  d2_min = d2_dat_min 'минимальный показания 2 датчика
+  d2_max = d2_dat_max 'максимальные показания 2 датчика
+  d3_min = d3_dat_min'минимальные показания 3 датчика
+  d3_max = d3_dat_max 'максимальные показания 3 датчика
+  crit_time = 1000 'значения времени для захвата, после которого он выключится
+  cord_now = 15'начальные координаты
+  stime = 100'время остановки
+  V_min = vel_min'минимальная скорость
+  
+  Sensor.SetMode(2,0)'датчик цвета(лев)
+  Sensor.SetMode(3,0)'датчик цвета(прав)
+  Motor.ResetCount("C")'мотор(левое)
+  Motor.ResetCount("B")'мотор(правое)
+  LCD.Clear() 'чистка экрана
+  
+  inf = 999999999 'число, принятое за бесконечность
+  P = 10 'число пи
+  cor_count = 0'счётчки нужных для доезда координат
+  V_cur = 0'текущая скорость
+  V_cur_ms = 0'текущая скорость без линии
+  x_tek = 1'первоначальные координаты по x
+  y_tek = 3'первоначальные координаты по у
+  kp_s = kpOffrd 'проп. коэффицент для movesync 0.7
+  kd_s = kdOffrd 'дифф. коэффицент для movesync 4
+  ki_s = kiOffrd 'интег. коэффицент для movesync 0.05
+  err_old = 0 'ошибка дед(для pd)
+  er_old = 0 'ошибка дед для пд movesync
+  curdir = 1 'текущее направление робота
+  s = 0 'сумма(для пида по линии)
+  smov = 0 'сумма(для пида movesync)
+  em = 0 'ошибка(для пида movesync)
+  im = 0 'кол-во ошибок(для пида movesync)
+  i = 0 'кол-во ошибок(для пида по линии)
+  butt[10] = 0
+  bcode = 0
+  
+  For ii = 1 To 35 'развесовка вершин
+    razves[ii] = inf
+  EndFor
+  razves[15] = 0'первая точка
+  For ib = 0 To 6'определение базы степеней 2
+    base[ib] = Math.Power(2,ib)
+  EndFor
+  For ii = 0 To 6'определение значения бита штрихкода
+    code[ii] = 42
+  EndFor
+EndFunction
+
+#endregion
+
+#region core
+
+#region datanal
+
+''''функция сброса градусов всех моторов
+Function ResetCount()
+  MotorA.ResetCount()
+  MotorB.ResetCount()
+  MotorC.ResetCount()
+  MotorD.ResetCount()
+EndFunction
+
+''''функция обработки показаний датчиков
+''''вывод:
+''''dat2 - обработ. показания 1 датчика;
+''''dat3 - обработ. показания 2 датчика
+Function Mapd(out number dat2, out number dat3)
+  n = EV3File.OpenRead("data_map")
+  d2_min = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d2_max = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d3_min = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d3_max = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  EV3File.Close(n)
+  
+  dat2 = Math.Floor((Sensor2.Raw1() - d2_min)/(d2_max - d2_min)*100)
+  dat3 = Math.Floor((Sensor3.Raw1() - d3_min)/(d3_max - d3_min)*100)
+  If dat3 < 0 Then
+    dat3 = 0
+  EndIf
+  If dat3 > 100 Then
+    dat3 = 100
+  EndIf
+  If dat2 < 0 Then
+    dat2 = 0
+  EndIf
+  If dat2 > 100 Then
+    dat2 = 100
+  EndIf
+EndFunction
+
+''''перевод сантиметров в градусы
+''''ввод:
+''''CM - сантиметры;
+''''вывод:
+''''Deg - градусы;
+Function CMInDeg(in number cm, out number deg)
+  deg = cm*(360/(d*P))
+EndFunction
+
+''''перевод градусов в сантиметры
+''''ввод:
+''''Deg - градусы;
+''''вывод:
+''''CM - сантиметры;
+Function DegInCM(in number deg, out number cm)
+  cm = deg/(360/(d*P))
+EndFunction
+
+''''функция для разгона/торможение
+''''velstart - скорость начальная
+''''velend - скорость конечная
+''''s - необходимое расстояние
+''''stek - текущее расстояние
+Function ChangeVel(in number velstart, in number velend, in number s, in number stek, out number vtek)
+  If (velstart - velend) < 0 Then
+    vtek = ((velstart - velend)*(stek)+s*velend)/s
+  Else
+    vtek = ((velstart - velend)*(s-stek)+s*velend)/s
+  EndIf
+EndFunction
+
+#endregion
+
+#region subfunc
+'подфункции
+
+#region sub prime
+'первая ступень подфункций
+
+''''езда по линии без привязки к ускорению
+''''ввод:
+''''kProp - проп. коэффициент(константа: @kp)
+''''kDiff - дифф. коэффициент(константа: @kd)
+''''kIntg - интег. коэффициент(константа: @ki)
+''''dir - направление движения(1 - прямо, -1 - назад)
+Function PIDlineNoa(in number kProp, in number kDiff, in number kIntg, in number dir)
+  Mapd(d2,d3)
+  
+  err = d2 - d3
+  U = err * kProp + (err - err_old) * kDiff + s * kIntg
+  Vl = V + U
+  Vr = V - U
+  
+  MotorB.StartPower(1*Vl)
+  MotorC.StartPower(-1*Vr)
+  
+  i = i + 1
+  If i > 10 Then
+    i = 1
+  EndIf
+  err_old = err
+  e[i] = err_old
+  s = 0
+  For j = 1 To 10
+    s = s + e[j]
+  EndFor
+  If Vl < V/10 Then
+    Vl = V/10
+  EndIf
+  If Vr < V/10 Then
+  EndIf
+EndFunction
+
+''''езда по линии(не использовать чистый)
+''''ввод:
+''''kProp - проп. коэффициент(константа: @kp)
+''''kDiff - дифф. коэффициент(константа: @kd)
+''''kIntg - интег. коэффициент(константа: @ki)
+''''dir - направление движения(1 - прямо, -1 - назад)
+Function PIDline(in number kProp, in number kDiff, in number kIntg, in number dir)
+  Mapd(d2,d3)
+  
+  err = d2 - d3
+  U = err * kProp + (err - err_old) * kDiff + s * kIntg
+  Vl = V_cur + U
+  Vr = V_cur - U
+  
+  MotorB.StartPower(-Vl*dir)
+  MotorC.StartPower(Vr*dir)
+  
+  i = i + 1
+  If i > 10 Then
+    i = 1
+  EndIf
+  err_old = err
+  e[i] = err_old
+  s = 0
+  For j = 1 To 10
+    s = s + e[j]
+  EndFor
+  If Vl < V/10 Then
+    Vl = V/10
+  EndIf
+  If Vr < V/10 Then
+    Vr = V/10
+  EndIf
+EndFunction
+
+''''езда одним датчиком
+''''ввод:
+''''kProp - проп. коэффициент(конст. @kp)
+''''kDiff - дифф. коэффициент(конст. @kd)
+''''kIntg - интег. коэффициент(конст. @ki)
+''''gray - идеальное значение
+''''dat_num - номер датчика, которым осуществляется езда по линии(2 или 3)
+''''dir - направление
+Function PIDHalfline(in number kProp, in number kDiff, in number kIntg, in number gray, in number dat_num, in number dir)
+  Mapd(d2,d3)
+  
+  If dat_num = 2 Then
+    err = -1 * (d2 - gray)
+  ElseIf dat_num = 3 Then
+    err = -1 * (d3 - gray)
+  EndIf
+  
+  U = err * kp + (err - err_old) * kd + s * ki
+  Vl = V + U
+  Vr = V - U
+  
+  MotorB.StartPower(-Vl*dir)
+  MotorC.StartPower(Vr*dir)
+  
+  i = i + 1
+  If i > 10 Then
+    i = 1
+  EndIf
+  err_old = err
+  e[i] = err_old
+  s = 0
+  For j = 1 To 10
+    s = s + e[j]
+  EndFor
+EndFunction
+
+''''высокоинтеллектуальная езда;
+''''ввод:
+''''kk - коэффициент коэффициентов(насколько сильнее ему регулироваться, по умолч. 1)
+''''v1 -скорость мотора В;
+''''v2 -скорость мотора С;
+''''dir - направление езды(1 - прямо, -1 - назад)
+Function PIDOffrd(in number kk, in number v1, in number v2, in number dir)
+  err = Math.Abs(Motor.GetCount("B")) - Math.Abs(Motor.GetCount("C"))
+  U = err * kp_s * kk  + (err - er_old) * kd_s * kk + smov * ki_s * kk
+  Vl = v1 - U
+  Vr = v2 + U
+  
+  MotorB.StartSpeed(-1*Vl*dir)
+  MotorC.StartSpeed(Vr*dir)
+  
+  im = im + 1
+  If im > 10 Then
+    im = 1
+  EndIf
+  er_old = err
+  em[im] = er_old
+  smov = 0
+  For j = 1 To 10
+    smov = smov + em[j]
+  EndFor
+EndFunction
+
+#endregion
+
+#region sub second
+'вторая ступень подфункций
+
+''''высокоинтеллектуальная езда movesync;
+''''ввод:
+''''v1 -скорость мотора В;
+''''v2 -скорость мотора С;
+''''deg -на сколько градусов проезд
+''''dor - делать ли разгон-торможение
+''''dir - напрваление движение
+Function PrzdBase(in number v1, in number v2, in number deg, in number dor, in number dir)
+  MotorB.ResetCount()
+  MotorC.ResetCount()
+  
+  V_cur_ms = V_min
+  
+  If dor = 1 Then
+    While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < (deg/10)*2
+      ChangeVel(V_min,Math.Abs(v1),(deg/10)*2,Motor.GetCount("B"),V_cur_ms)
+      PIDOffrd(1,V_cur_ms,V_cur_ms,dir)
+    EndWhile
+    
+    While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < (deg-deg/5)*2
+      PIDOffrd(1,v1,v2,dir)
+    EndWhile
+    
+    While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < (deg/10)*2
+      ChangeVel(V_min,Math.Abs(v1),(deg/10)*2,Motor.GetCount("B"),V_cur_ms)
+      PIDOffrd(1,V_cur_ms,V_cur_ms,dir)
+    EndWhile
+    
+    MotorBC.OffAndBrake()
+    
+  Else
+    MotorB.ResetCount()
+    MotorC.ResetCount()
+    
+    Program.Delay(10)
+    
+    While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < Math.Abs(deg)*2
+      PIDOffrd(1,v1,v2,dir)
+    EndWhile
+    
+    Program.Delay(10)
+    MotorBC.OffAndBrake()
+  EndIf
+EndFunction
+
+''''высокоинтеллектуальная езда movesync без разгона;
+''''ввод:
+''''v1 -скорость мотора В;
+''''v2 -скорость мотора С;
+''''deg -на сколько градусов проезд
+Function EzdOffrdNr(in number v1, in number v2, in number deg)
+  While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < deg*2
+    PIDOffrd(1,v1,v2,1)
+  EndWhile
+EndFunction
+
+#endregion
+
+#endregion
+
+#region Ezd
+'набор функций для езды по линии
+
+#region Pr
+'езда до перекрёстка
+
+''''езда до перекрёстка;
+''''ввод:
+''''kProp - проп. коэффициент(константа: @kp)
+''''kDiff - дифф. коэффициент(константа: @kd)
+''''kIntg - интег. коэффициент(константа: @ki)
+''''dir - направление движения(1 - прямо, -1 - назад)
+''''vel - макс. скорость движения
+''''prg - порог, который определяет черный(константа: @bl)
+Function EzdPr(in number kProp, in number kDiff, in number kIntg, in number prg, in number vel, in number cm_stop, in number dir)
+  V_cur = V_min
+  Program.Delay(10)
+  
+  While V_cur < vel
+    V_cur += a
+    PIDline(kProp,kDiff,kIntg,dir)
+    mapd(d2,d3)
+  EndWhile
+  V_cur = vel
+  
+  mapd(d2,d3)
+  While d2 > prg Or d3 > prg
+    PIDline(kProp,kDiff,kIntg,dir)
+    mapd(d2,d3)
+  EndWhile
+  
+  MotorBC.OffAndBrake()
+  Motor.ResetCount("B")
+  Motor.ResetCount("C")
+  vs = vel
+  CMInDeg(cm_stop,deg)
+  Speaker.Tone(100,1000,10)
+  
+  While Math.Abs(Motor.GetCount("B")) < deg
+    vs = ChangeVel(V_min,Math.Abs(v1),(deg/10)*2,Motor.GetCount("B"),V_cur_ms)
+    PIDOffrd(1,vs,vs,1)
+  EndWhile
+  
+  MotorBC.OffAndBrake()
+EndFunction
+
+''''езда до полуперекрёстка;
+''''ввод:
+''''kProp - проп. коэффициент(константа: @kp)
+''''kDiff - дифф. коэффициент(константа: @kd)
+''''kIntg - интег. коэффициент(константа: @ki)
+''''dir - направление движения(1 - прямо, -1 - назад)
+''''vel - макс. скорость движения
+''''prg - порог, который определяет черный(константа: @bl)
+Function EzdPrHalfcross(in number kProp, in number kDiff, in number kIntg, in number prg, in number vel, in number dir)
+  V_cur = V_min
+  Program.Delay(10)
+  
+  While V_cur < vel
+    V_cur += a
+    mapd(d2,d3)
+    PIDline(kProp,kDiff,kIntg,dir)
+  EndWhile
+  
+  mapd(d2,d3)
+  While d2 > prg And d3 > prg
+    PIDline(kProp,kDiff,kIntg,dir)
+    mapd(d2,d3)
+  EndWhile
+  
+  MotorBC.OffAndBrake()
+  Motor.ResetCount("B")
+  Motor.ResetCount("C")
+  vs = vel
+  CMInDeg(5,deg)
+  
+  Speaker.Tone(30,1000,100)
+  While Math.Abs(Motor.GetCount("B")) < deg
+    vs = ((vel - V_min)*(deg - Math.Abs(Motor.GetCount("B")))+deg*V_min)/deg
+    PIDOffrd(1,vs,vs,1)
+  EndWhile
+  MotorBC.OffAndBrake()
+EndFunction
+
+''''езда до чёрного без разгона и торможения;
+''''prg - порог, который определяет черный(константа: @bl)
+Function EzdPrStop(in number prg, in number vel)
+  V_cur = V
+  Program.Delay(10)
+  While Sensor2.Raw1() > prg And Sensor3.Raw1() > prg
+    PIDOffrd(1,25,25,1)
+  EndWhile
+EndFunction
+
+''''езда по 1 датчику;
+''''ввод:
+''''kProp - проп. коэффициент(константа: @kp)
+''''kDiff - дифф. коэффициент(константа: @kd)
+''''kIntg - интег. коэффициент(константа: @ki)
+''''prg - порог, который определяет черный(константа: @bl)
+''''dat_num - номер датчика, которым едем по линии
+''''vel - макс. скорость движения
+''''dir - направление движения(1 - прямо, -1 - назад)
+Function EzdPrHalfline(in number kProp,in number kDiff,in number kIntg, in number prg, in number dat_num, in number vel, in number dir)
+  n = EV3File.OpenRead("data_map")
+  d2_min = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d2_max = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d3_min = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d3_max = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  EV3File.Close(n)
+  V_cur = V_min
+  Program.Delay(10)
+  
+  If dat_num = 2 Then
+    gray = (d2_min + d2_max)/2
+  Else
+    gray = (d3_min + d3_max)/2
+  EndIf
+  While V_cur < vel
+    V_cur += a
+    PIDHalfline(kProp,kDiff,KIntg,gray,dat_num,dir)
+  EndWhile
+  
+  mapd(d2,d3)
+  While d2 > prg Or d3 > prg
+    PIDHalfline(kProp,kDiff,KIntg,gray,dat_num,dir)
+    mapd(d2,d3)
+  EndWhile
+  
+  MotorBC.OffAndBrake()
+  Motor.ResetCount("B")
+  Motor.ResetCount("C")
+  vs = vel
+  CMInDeg(5,deg)
+  Speaker.Tone(30,1000,100)
+  
+  While Math.Abs(Motor.GetCount("B")) < deg
+    vs = ((vel - V_min)*(deg - Math.Abs(Motor.GetCount("B")))+deg*V_min)/deg
+    PIDOffrd(1,vs,vs,1)
+  EndWhile
+  MotorBC.OffAndBrake()
+EndFunction
+
+#endregion
+
+#region Cm
+'езда по сантиметрам
+
+''''езда по линии по расстоянию в см по линии;
+''''ввод:
+''''kProp - проп. коэффициент(константа: @kp)
+''''kDiff - дифф. коэффициент(константа: @kd)
+''''kIntg - интег. коэффициент(константа: @ki)
+''''cm - сантиметры, на которые нужно проехать
+''''vel - макс. скорость движения
+''''dir - направление движения(1 - прямо, -1 - назад)
+Function EzdCm(in number kProp,in number kDiff,in number kIntg, in number cm, in number vel, in number dir)
+  CMInDeg(cm-cm/5,degb)
+  CMInDeg(cm/10,deg)
+  
+  V_cur = V_min
+  Motor.ResetCount("B")
+  Motor.ResetCount("C")
+  While Math.Abs(Motor.GetCount("B")) < deg
+    V_cur = ((vel - V_min)*(deg)+deg*V_min)/deg
+    PIDline(kProp,kDiff,kIntg,dir)
+  EndWhile
+  V_cur = vel
+  
+  While Motor.GetCount("C") < degb
+    PIDline(kProp,kDiff,kIntg,dir)
+  EndWhile
+  
+  Motor.ResetCount("B")
+  While Math.Abs(Motor.GetCount("B")) < deg
+    V_cur = ((vel - V_min)*(deg - Math.Abs(Motor.GetCount("B")))+deg*V_min)/deg
+    PIDline(kProp,kDiff,kIntg,dir)
+  EndWhile
+  MotorBC.OffAndBrake()
+EndFunction
+
+''''езда по 1 датчику;
+''''ввод:
+''''kProp - проп. коэффициент(константа: @kp)
+''''kDiff - дифф. коэффициент(константа: @kd)
+''''kIntg - интег. коэффициент(константа: @ki)
+''''cm - сантиметры, на которые надо проехать;
+''''dat_num - номер датчика, которым едем по линии
+''''dir - направление(1 - прямо, -1 - назад)
+Function EzdCmHalfline(in number kProp, in number kDiff, in number kIntg, in number cm, in number dat_num, in number dir)
+  CMInDeg(cm,deg)
+  V_cur = V
+  
+  n = EV3File.OpenRead("data_map")
+  d2_min = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d2_max = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d3_min = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  d3_max = EV3File.ConvertToNumber(EV3File.ReadLine(n))
+  EV3File.Close(n)
+  
+  If dat_num = 2 Then
+    gray = (d2_min + d2_max)/2
+  Else
+    gray = (d3_min + d3_max)/2
+  EndIf
+  
+  Motor.ResetCount("C")
+  Motor.ResetCount("B")
+  While (Math.Abs(Motor.GetCount("C")) + Math.Abs(Motor.GetCount("B")))/2 < deg
+    Mapd(d2,d3)
+    PIDHalfline(kk, gray,dat_num,dir)
+  EndWhile
+  
+  MotorBC.OffAndBrake()
+EndFunction
+
+#endregion
+
+#region Uz
+
+''''езда до объекта;
+''''ввод
+''''kProp - проп. коэффициент(константа: @kp)
+''''kDiff - дифф. коэффициент(константа: @kd)
+''''kIntg - интег. коэффициент(константа: @ki)
+''''prg2, prg1 - диапозон расстояния(prg2 - большее, prg1 - меньшее)
+''''vel - макс. скорость движения
+''''dir - направление движения(1 - прямо, -1 - назад)
+Function EzdUz(in number kProp, in number kDiff, in number KIntg, in number prg1, in number prg2, in number vel, in number dir)
+  V_cur = 0
+  
+  While V_cur < vel
+    V_cur += a
+    PIDline(kProp,kDiff,kIntg,dir)
+  EndWhile
+  
+  While Sensor1.Raw1() < prg1 Or Sensor1.Raw1() > prg2
+    PIDline(kProp,kDiff,kIntg,dir)
+  EndWhile
+  MotorBC.OffAndBrake()
+  Program.Delay(3000)
+EndFunction
+
+#endregion
+
+#endregion
+
+#region Przd
+'езда без линии
+
+#region Cm
+'езда без линии по сантиметрам
+
+''''movesync проезд по сантиметрам
+''''ввод:
+''''cm - сантиметры, на которые нужно проехать;
+''''ve - приблизительная желаемая скорость;
+''''dir - напрваление(1 - прямо, -1 - назад)
+Function PrzdCm(in number cm, in number ve, in number dir)
+  Motor.ResetCount("C")
+  Motor.ResetCount("B")
+  Program.Delay(10)
+  
+  CMInDeg(cm,deg)
+  PrzdBase(ve,ve,deg,1,dir)
+  
+  MotorBC.OffAndBrake()
+EndFunction
+
+''''movesync проезд по сантиметрам без разгона;
+''''ввод:
+''''cm - сантиметры, на которые надо проехать
+Function PrzdCmNr(in number cm)
+  CMInDeg(cm,deg)
+  
+  While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < deg*2
+    PIDOffrd(45,45,1)
+  EndWhile
+  
+  MotorBC.OffAndBrake()
+EndFunction
+
+#endregion
+
+#region Tm
+'езда без линии по времени
+
+''''регулируемый проезд прямо без линии по времени
+''''ввод:
+''''time - время в милисекундах
+''''vel - базовая скорость
+''''dir - направление(1 - прямо, -1 - назад)
+Function PrzdTm(in number time, in number vel, in number dir)
+  Program.Delay(10)
+  Motor.ResetCount("B")
+  Motor.ResetCount("C")
+  
+  Time.Reset3()
+  While Time.Get3() < time
+    PIDOffrd(1,vel,vel,dir)
+  EndWhile
+EndFunction
+
+#endregion
+
+#endregion
+
+#region Turn
+'повороты
+
+''''поворот по градусам
+''''ввод:
+''''vel - скорость(- - направо, + - налево)
+''''deg - на сколько поворот;
+Function TurnDeg(in number vel, in number deg)
+  MotorBC.OffAndBrake()
+  Program.Delay(10)
+  MoveSync(-1*vel,1*vel,(18*deg)/d,0,1)
+  Program.Delay(10)
+  MotorBC.OffAndBrake()
+  Program.Delay(10)
+EndFunction
+
+''''поворот по линии
+''''ввод:
+''''если turnn = 0 - поворот налево, если turnn <> 0 - поворот направо;
+''''k - порог, определяющий чёрный(константа : @bl)
+Function TurnUlt(in number vel, in number turnn, in number k)
+  If  turnn = 0 Then
+    TurnDeg(30,20)
+    Mapd(d2,d3)
+    While d3 > k
+      Motor.StartSync("BC", vel, vel)
+      Mapd(d2,d3)
+    EndWhile
+    
+    Mapd(d2,d3)
+    While d2 > k
+      Motor.StartSync("BC", vel, vel)
+      Mapd(d2,d3)
+    EndWhile
+    curdir += 1
+    
+    If curdir < 1 Then
+      curdir = 4
+    ElseIf curdir > 4 Then
+      curdir = 1
+    EndIf
+  Else
+    TurnDeg(-30,20)
+    
+    Mapd(d2,d3)
+    While d3 > k
+      Mapd(d2,d3)
+      Motor.StartSync("BC", -vel, -vel)
+    EndWhile
+    Mapd(d2,d3)
+    While d2 > k
+      Mapd(d2,d3)
+      Motor.StartSync("BC", -vel, -vel)
+    EndWhile
+    curdir -= 1
+    
+    If curdir < 1 Then
+      curdir = 4
+    ElseIf curdir > 4 Then
+      curdir = 1
+    EndIf
+  EndIf
+  MotorBC.OffAndBrake()
+EndFunction
+
+#endregion
+
+#region Hvat
+'захват
+
+''''захват до стопора/по градусам(смотря что раньше)
+''''ввод:
+''''deg - требуемый градус;
+''''port - порт мотора
+Function HvatDif(in number deg, in string port)
+  Time.Reset6()
+  Motor.ResetCount(port)
+  fl = 0
+  bly = 0
+  If deg > 0 Then
+    Motor.Start(port,-50)
+    Program.Delay(100)
+    While Motor.GetCount(port) < deg And (Motor.GetSpeed(port) > 5 Or Time.Get6() < 300) And Time.Get6() < crit_time * 3
+      err = deg - Motor.GetCount(port)
+      U = kpm * err
+      If U > 100 Then
+        U = 100
+      EndIf
+      If U < -100 Then
+        U = -100
+      EndIf
+      If U < 5 And U > 0 Then
+        U = 5
+      EndIf
+      If U > -5 And U < 0 Then
+        U = -5
+      EndIf
+      Motor.StartPower(port,U)
+    EndWhile
+    Motor.Stop(port,"True")
+  Else
+    Motor.Start(port,-50)
+    Program.Delay(100)
+    While Motor.GetCount(port) > deg And (Motor.GetSpeed(port) < 5 Or Time.Get6() < 300) And Time.Get6() < crit_time * 3
+      err = Motor.GetCount(port) - deg
+      U = kpm * err
+      If U > 100 Then
+        U = 100
+      EndIf
+      If U < -100 Then
+        U = -100
+      EndIf
+      If U < 5 And U > 0 Then
+        U = 5
+      EndIf
+      If U > -5 And U < 0 Then
+        U = -5
+      EndIf
+      Motor.StartPower(port,-U)
+    EndWhile
+  EndIf
+  Time.Reset1()
+  Motor.Stop(port,"True")
+EndFunction
+
+''''захват по градусам с регуляцией
+''''ввод:
+''''deg - требуемый градус;
+''''port - порт мотора
+Function HvatDeg(in number deg, in number kpmann, in string port)
+  Time.Reset1()
+  Motor.ResetCount(port)
+  If deg < 0 Then
+    While Math.Abs(Motor.GetCount(port)-deg) > 1 And Time.Get1() < crit_time
+      err = deg - Motor.GetCount(port)
+      U = kpmann * err
+      If U > 100 Then
+        U = 100
+      EndIf
+      If U < -100 Then
+        U = -100
+      EndIf
+      If U < 5 And U > 0 Then
+        U = 5
+      EndIf
+      If U > -5 And U < 0 Then
+        U = -5
+      EndIf
+      Motor.StartPower(port,U)
+    EndWhile
+    Motor.Stop(port,"False")
+  Else
+    While Math.Abs(Motor.GetCount(port)-deg) > 1 And Time.Get1() < crit_time
+      err = Motor.GetCount(port) - deg
+      U = kpmann * err
+      If U > 100 Then
+        U = 100
+      EndIf
+      If U < -100 Then
+        U = -100
+      EndIf
+      If U < 5 And U > 0 Then
+        U = 5
+      EndIf
+      If U > -5 And U < 0 Then
+        U = -5
+      EndIf
+      Motor.StartPower(port,-U)
+    EndWhile
+  EndIf
+  Time.Reset1()
+  Motor.Stop(port,"False")
+EndFunction
+
+''''захват по времени без регуляции
+''''ввод:
+''''vel - скорость движения
+''''time - сколько времени двигаться
+''''doStop - делать ли остановку(1 - да, 0 -нет)
+''''port - порт мотора
+Function HvatNoreg(in number vel, in number time, in number doStop, in string port)
+  Time.Reset1()
+  Motor.ResetCount(port)
+  While Time.Get1() < time
+    Motor.StartPower(port,vel)
+  EndWhile
+  If doStop = 1 Then
+    Motor.Stop(port,"True")
+  EndIf
+  Time.Reset1()
+EndFunction
+
+#endregion
+
+#region vietnam
+'без комментариев
+
+''''доезд по сетке
+''''x_now - текущие координаты по х
+''''y_now - текущие координаты по у
+''''x_aim - необходимые координаты по х
+''''y_aim - необходимые координаты по у
+Function Doezd(in number x_now, in number y_now, in number x_aim, in number y_aim)
+  dx = x_aim - x_now
+  dy = y_aim - y_now
+  If dy < 0 Then ' 2
+    While enc <> 2
+      TurnUlt(1,bl)
+    EndWhile
+  ElseIf dy > 0 Then' 4
+    While enc <> 4
+      TurnUlt(1,bl)
+    EndWhile
+  EndIf
+  If y_aim <> y_now Then
+    For ida = 1 To Math.Abs(y_aim - y_now)
+      EzdPr(bl)
+      If enc = 4 Then
+        y_tek += 1
+        cord_now = (y_tek - 1) * 7 + x_tek
+      ElseIf enc = 2 Then
+        y_tek -= 1
+        cord_now = (y_tek - 1) * 7 + x_tek
+      EndIf
+    EndFor
+  EndIf
+  If dx < 0 Then ' 1
+    While enc <> 3
+      TurnUlt(1,bl)
+    EndWhile
+  ElseIf dx > 0 Then ' 3
+    While enc <> 1
+      TurnUlt(1,bl)
+    EndWhile
+  EndIf
+  For ida = 1 To Math.Abs(x_aim - x_now)
+    EzdPr(bl)
+    If enc = 3 Then
+      x_tek -= 1
+      cord_now = (y_tek - 1) * 7 + x_tek
+    ElseIf enc = 1 Then
+      x_tek += 1
+      cord_now = (y_tek - 1) * 7 + x_tek
+    EndIf
+  EndFor
+EndFunction
+
+#endregion
+
+#endregion
