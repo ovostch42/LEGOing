@@ -36,6 +36,7 @@ number stime 'время остановки
 number old_count 'предыдущий градус мотора
 number V_min
 number V_cur_ms
+number curdir
 
 Function Init(in number acceleration, in number kprop, in number kdiff, in number kintg, in number kpMann, in number velocity, in number kpOffrd, in number kdOffrd, in number kiOffrd, in number vel_min, in number black)
   a = acceleration 'ускорение
@@ -46,10 +47,10 @@ Function Init(in number acceleration, in number kprop, in number kdiff, in numbe
   V = velocity 'скорость
   bl = black 'чёрный порог(по нему определяется чёрный)
   d =  6.24 'диаметр колеса робота
-  d2_min = d2_dat_min 'минимальный показания 2 датчика
-  d2_max = d2_dat_max 'максимальные показания 2 датчика
-  d3_min = d3_dat_min'минимальные показания 3 датчика
-  d3_max = d3_dat_max 'максимальные показания 3 датчика
+  d2_min = 2 'минимальный показания 2 датчика
+  d2_max = 88 'максимальные показания 2 датчика
+  d3_min = 8'минимальные показания 3 датчика
+  d3_max = 89 'максимальные показания 3 датчика
   crit_time = 1000 'значения времени для захвата, после которого он выключится
   cord_now = 15'начальные координаты
   stime = 100'время остановки
@@ -62,7 +63,7 @@ Function Init(in number acceleration, in number kprop, in number kdiff, in numbe
   LCD.Clear() 'чистка экрана
   
   inf = 999999999 'число, принятое за бесконечность
-  P = 10 'число пи
+  P = 3.14 'число пи
   cor_count = 0'счётчки нужных для доезда координат
   V_cur = 0'текущая скорость
   V_cur_ms = 0'текущая скорость без линии
@@ -155,16 +156,29 @@ Function DegInCM(in number deg, out number cm)
 EndFunction
 
 ''''функция для разгона/торможение
-''''velstart - скорость начальная
-''''velend - скорость конечная
-''''s - необходимое расстояние
+''''ввод:
+''''velmin - скорость минимальная
+''''velmax - скорость максимальная
+''''dir - направление(1 - разгон, -1 - торможение)
+''''len - необходимое расстояние
 ''''stek - текущее расстояние
-Function ChangeVel(in number velstart, in number velend, in number s, in number stek, out number vtek)
-  If (velstart - velend) < 0 Then
-    vtek = ((velstart - velend)*(stek)+s*velend)/s
+''''вывод:
+''''vtek - скорость для движения в данный момент времени
+Function ChangeVel(in number velmin, in number velmax, in number dir, in number len, in number stek, out number vtek)
+  If (dir = 1) Then
+    vtek = (Math.Abs(velmin - velmax)*(stek)+len*velmin)/len
   Else
-    vtek = ((velstart - velend)*(s-stek)+s*velend)/s
+    vtek = (Math.Abs(velmin - velmax)*(len-stek)+len*velmin)/len
   EndIf
+  
+  'numfd = EV3File.OpenAppend("razgdat")
+  'EV3File.WriteLine(numfd,"###")
+  'EV3File.WriteLine(numfd,ss)
+  'EV3File.WriteLine(numfd,"+++")
+  'EV3File.WriteLine(numfd,vtek)
+  'EV3File.WriteLine(numfd,"---")
+  'EV3File.WriteLine(numfd,stek)
+  'EV3File.Close(numfd)
 EndFunction
 
 #endregion
@@ -292,6 +306,10 @@ Function PIDOffrd(in number kk, in number v1, in number v2, in number dir)
   Vl = v1 - U
   Vr = v2 + U
   
+  'numfd = EV3File.OpenAppend("data_map")
+  'EV3File.WriteLine(numfd,U)
+  'EV3File.Close(numfd)
+  
   MotorB.StartSpeed(-1*Vl*dir)
   MotorC.StartSpeed(Vr*dir)
   
@@ -324,19 +342,32 @@ Function PrzdBase(in number v1, in number v2, in number deg, in number dor, in n
   MotorC.ResetCount()
   
   V_cur_ms = V_min
-  
   If dor = 1 Then
-    While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < (deg/10)*2
-      ChangeVel(V_min,Math.Abs(v1),(deg/10)*2,Motor.GetCount("B"),V_cur_ms)
+    Program.Delay(10)
+    MotorB.ResetCount()
+    MotorC.ResetCount()
+    deg_tek = 0
+    While (deg_tek < (deg/4))
+      deg_tek = Math.Abs(Motor.GetCount("B"))
+      ChangeVel(V_min,Math.Abs(v1),1,(deg/4),deg_tek,V_cur_ms)
       PIDOffrd(1,V_cur_ms,V_cur_ms,dir)
     EndWhile
     
-    While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < (deg-deg/5)*2
-      PIDOffrd(1,v1,v2,dir)
+    MotorB.ResetCount()
+    MotorC.ResetCount()
+    deg_tek = 0
+    While (deg_tek < (deg/2))
+      deg_tek = Math.Abs(Motor.GetCount("B"))
+      PIDOffrd(1,V_cur_ms,V_cur_ms,dir)
     EndWhile
     
-    While (Math.Abs(Motor.GetCount("B")) + Math.Abs(Motor.GetCount("C"))) < (deg/10)*2
-      ChangeVel(V_min,Math.Abs(v1),(deg/10)*2,Motor.GetCount("B"),V_cur_ms)
+    MotorB.ResetCount()
+    MotorC.ResetCount()
+    deg_tek = 0
+    Time.Reset4()
+    While (deg_tek < (deg/4) and Time.Get4() < 2000)
+      deg_tek = Math.Abs(Motor.GetCount("B"))
+      ChangeVel(V_min,Math.Abs(v1),-1,(deg/4),deg_tek,V_cur_ms)
       PIDOffrd(1,V_cur_ms,V_cur_ms,dir)
     EndWhile
     
@@ -386,7 +417,7 @@ EndFunction
 ''''dir - направление движения(1 - прямо, -1 - назад)
 ''''vel - макс. скорость движения
 ''''prg - порог, который определяет черный(константа: @bl)
-Function EzdPr(in number kProp, in number kDiff, in number kIntg, in number prg, in number vel, in number cm_stop, in number dir)
+Function EzdPr(in number kProp, in number kDiff, in number kIntg, in number prg, in number dost, in number vel, in number cm_stop, in number dir)
   V_cur = V_min
   Program.Delay(10)
   
@@ -403,17 +434,22 @@ Function EzdPr(in number kProp, in number kDiff, in number kIntg, in number prg,
     mapd(d2,d3)
   EndWhile
   
-  MotorBC.OffAndBrake()
   Motor.ResetCount("B")
   Motor.ResetCount("C")
+  MotorBC.OffAndBrake()
   vs = vel
   CMInDeg(cm_stop,deg)
   Speaker.Tone(100,1000,10)
-  
-  While Math.Abs(Motor.GetCount("B")) < deg
-    vs = ChangeVel(V_min,Math.Abs(v1),(deg/10)*2,Motor.GetCount("B"),V_cur_ms)
-    PIDOffrd(1,vs,vs,1)
-  EndWhile
+  If dost = 1 Then
+    While Math.Abs(Motor.GetCount("B")) < deg
+      vs = ((vel - V_min)*(deg - Math.Abs(Motor.GetCount("B")))+deg*V_min)/deg
+      PIDOffrd(1,vs,vs,1)
+    EndWhile
+  EndIf
+  'While Math.Abs(Motor.GetCount("B")) < deg
+  'ChangeVel(V_min,Math.Abs(v1),(deg/10)*2,1,Motor.GetCount("B"),vs)
+  'PIDOffrd(1,vs,vs,1)
+  'EndWhile
   
   MotorBC.OffAndBrake()
 EndFunction
@@ -426,7 +462,7 @@ EndFunction
 ''''dir - направление движения(1 - прямо, -1 - назад)
 ''''vel - макс. скорость движения
 ''''prg - порог, который определяет черный(константа: @bl)
-Function EzdPrHalfcross(in number kProp, in number kDiff, in number kIntg, in number prg, in number vel, in number dir)
+Function EzdPrHalfcross(in number kProp, in number kDiff, in number kIntg, in number prg, in number dost, in number vel, in number dir)
   V_cur = V_min
   Program.Delay(10)
   
@@ -444,15 +480,17 @@ Function EzdPrHalfcross(in number kProp, in number kDiff, in number kIntg, in nu
   
   MotorBC.OffAndBrake()
   Motor.ResetCount("B")
-  Motor.ResetCount("C")
+  
   vs = vel
   CMInDeg(5,deg)
   
   Speaker.Tone(30,1000,100)
-  While Math.Abs(Motor.GetCount("B")) < deg
-    vs = ((vel - V_min)*(deg - Math.Abs(Motor.GetCount("B")))+deg*V_min)/deg
-    PIDOffrd(1,vs,vs,1)
-  EndWhile
+  If dost = 1 Then
+    While Math.Abs(Motor.GetCount("B")) < deg
+      vs = ((vel - V_min)*(deg - Math.Abs(Motor.GetCount("B")))+deg*V_min)/deg
+      PIDOffrd(1,vs,vs,1)
+    EndWhile
+  EndIf
   MotorBC.OffAndBrake()
 EndFunction
 
@@ -622,6 +660,38 @@ EndFunction
 #region Przd
 'езда без линии
 
+#region Line
+
+Function PrzdLineW(in number prg, in number vel, in number cm_stop, in number dir)
+  V_cur = V_min
+  Program.Delay(10)
+  
+  mapd(d2,d3)
+  While d2 < prg And d3 < prg
+    mapd(d2,d3)
+    PIDOffrd(1,vel,vel,dir)
+  EndWhile
+  
+  MotorBC.OffAndBrake()
+  
+EndFunction
+
+Function PrzdLine(in number prg, in number vel, in number cm_stop, in number dir)
+  V_cur = V_min
+  Program.Delay(10)
+  
+  mapd(d2,d3)
+  While d2 > prg Or d3 > prg
+    mapd(d2,d3)
+    PIDOffrd(1,vel,vel,dir)
+  EndWhile
+  
+  MotorBC.OffAndBrake()
+  
+EndFunction
+
+#endregion
+
 #region Cm
 'езда без линии по сантиметрам
 
@@ -688,8 +758,9 @@ EndFunction
 ''''deg - на сколько поворот;
 Function TurnDeg(in number vel, in number deg)
   MotorBC.OffAndBrake()
-  Program.Delay(10)
-  MoveSync(-1*vel,1*vel,(18*deg)/d,0,1)
+  Program.Delay(30)
+  MotorBC.SetSpeed(0)
+  PrzdBase(-1*vel,1*vel,(18*deg)/d,0,1)
   Program.Delay(10)
   MotorBC.OffAndBrake()
   Program.Delay(10)
@@ -885,41 +956,41 @@ Function Doezd(in number x_now, in number y_now, in number x_aim, in number y_ai
   dx = x_aim - x_now
   dy = y_aim - y_now
   If dy < 0 Then ' 2
-    While enc <> 2
-      TurnUlt(1,bl)
+    While curdir <> 2
+      TurnUlt(30,1,bl)
     EndWhile
   ElseIf dy > 0 Then' 4
-    While enc <> 4
-      TurnUlt(1,bl)
+    While curdir <> 4
+      TurnUlt(30,1,bl)
     EndWhile
   EndIf
   If y_aim <> y_now Then
     For ida = 1 To Math.Abs(y_aim - y_now)
-      EzdPr(bl)
-      If enc = 4 Then
+      EzdPr(kp,kd,ki,bl,V,5,1)
+      If curdir = 4 Then
         y_tek += 1
         cord_now = (y_tek - 1) * 7 + x_tek
-      ElseIf enc = 2 Then
+      ElseIf curdir = 2 Then
         y_tek -= 1
         cord_now = (y_tek - 1) * 7 + x_tek
       EndIf
     EndFor
   EndIf
   If dx < 0 Then ' 1
-    While enc <> 3
-      TurnUlt(1,bl)
+    While curdir <> 3
+      TurnUlt(30,1,bl)
     EndWhile
   ElseIf dx > 0 Then ' 3
-    While enc <> 1
-      TurnUlt(1,bl)
+    While curdir <> 1
+      TurnUlt(30,1,bl)
     EndWhile
   EndIf
   For ida = 1 To Math.Abs(x_aim - x_now)
-    EzdPr(bl)
-    If enc = 3 Then
+    EzdPr(kp,kd,ki,bl,V,5,1)
+    If curdir = 3 Then
       x_tek -= 1
       cord_now = (y_tek - 1) * 7 + x_tek
-    ElseIf enc = 1 Then
+    ElseIf curdir = 1 Then
       x_tek += 1
       cord_now = (y_tek - 1) * 7 + x_tek
     EndIf
